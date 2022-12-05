@@ -2,63 +2,90 @@
 
 #include <iostream>
 #include <mutex>
-#include <queue>
+//#include <queue>
 #include <sstream>
 #include <thread>
+#include <condition_variable>
+#include "queue.h"
+#include <vector>
+
+using namespace std;
 
 template <typename T>
 class ConcurrentQueue {
- public:
-  void push(const T &data) { queue_.push(data); }
 
-  T pop() {
-    T result = queue_.front();
-    return result;
-  }
+  private:
+    //std::queue<T> queue_;
+    Cola<T> queue_;
+    std::mutex queue_mutex_;
+    std::condition_variable cv1;
 
- private:
-  std::queue<T> queue_;
-  std::mutex queue_mutex_;
+  public:
+    void push(const T &data) 
+    { 
+      // m1.lock
+      std::lock_guard<std::mutex> lock(queue_mutex_);
+      queue_.push(data); 
+      cv1.notify_one();
+      // m1.unlock()
+    }
+
+    T pop() {
+      std::unique_lock<std::mutex> lock(queue_mutex_);
+      while (queue_.empty())
+      {
+        cv1.wait(lock);
+      }
+      
+      //T result = queue_.front();
+      T result = queue_.pop();
+      return result;
+    }
+
+
 };
 
 class Producer {
- public:
-  Producer(unsigned int id, ConcurrentQueue<std::string> *queue)
-      : id_(id), queue_(queue) {}
+  private:
+    unsigned int id_;
+    ConcurrentQueue<std::string> *queue_;
 
-  void operator()() {
-    int data = 0;
-    while (true) {
-      std::stringstream stream;
-      stream << "Producer: " << id_ << " Data: " << data++ << std::endl;
-      queue_->push(stream.str());
-      std::cout << stream.str() << std::endl;
+  public:
+    Producer(unsigned int id, ConcurrentQueue<std::string> *queue){
+      id_ = id;
+      queue_ = queue;
     }
-  }
 
- private:
-  unsigned int id_;
-  ConcurrentQueue<std::string> *queue_;
+    void operator()() {
+      int data = 0;
+      while (true) {
+        std::stringstream stream;
+        stream << "Producer: " << id_ << " Data: " << data++ << std::endl;
+        queue_->push(stream.str());
+        std::cout << stream.str() << std::endl;
+      }
+    }
 };
 
 class Consumer {
- public:
-  Consumer(unsigned int id, ConcurrentQueue<std::string> *queue)
-      : id_(id), queue_(queue) {}
+  private:
+    unsigned int id_;
+    ConcurrentQueue<std::string> *queue_;
 
-  void operator()() {
-    while (true) {
-      std::stringstream stream;
-      stream << "Consumer: " << id_ << " Data: " << queue_->pop().c_str()
-             << std::endl;
-
-      std::cout << stream.str() << std::endl;
+  public:
+    Consumer(unsigned int id, ConcurrentQueue<std::string> *queue){
+      id_ = id;
+      queue_ = queue;
     }
-  }
 
- private:
-  unsigned int id_;
-  ConcurrentQueue<std::string> *queue_;
+    void operator()() {
+      while (true) {
+        std::stringstream stream;
+        stream << "Consumer: " << id_ << " Data: " << queue_->pop().c_str()<< std::endl;
+
+        std::cout << stream.str() << std::endl;
+      }
+    }
 };
 
 int main(int argc, char *argv[]) {
@@ -72,6 +99,7 @@ int main(int argc, char *argv[]) {
 
   std::vector<std::thread *> producers;
   for (unsigned int i = 0; i < number_producers; ++i) {
+    //cout << i << endl;
     std::thread *producer_thread = new std::thread(Producer(i, &queue));
     producers.push_back(producer_thread);
   }
@@ -84,7 +112,20 @@ int main(int argc, char *argv[]) {
 
   int stop;
   std::cin >> stop;
-  // join
+  
+  // join. TO DO...
+  /*
+  for(int i = 0; i < number_producers; i++){
+    producers[i]->join();
+  }
+
+  for(int i = 0; i < number_consumers; i++){
+    consumers[i]->join();
+  }
+  */
+
+  for (auto& th : producers) th->join();
+  for (auto& th : consumers) th->join();
 
   return 0;
 }
